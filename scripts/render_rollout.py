@@ -1,7 +1,9 @@
-"""Render a policy rollout to MP4 (run locally; needs OpenGL).
+"""Render a policy rollout to MP4 or GIF.
+
+Works headless with MUJOCO_GL=osmesa (software rendering) on the GPU server.
 
 Usage: python scripts/render_rollout.py --teacher ckpt.pt --type hurdle --level 6 \
-           [--student student.pt] --out rollout.mp4
+           [--student student.pt] --out rollout.gif
 """
 from __future__ import annotations
 
@@ -52,7 +54,7 @@ def main():
         latent = torch.zeros(1, snn_cfg.event_latent)
         head = torch.zeros(1, 2)
 
-    renderer = mujoco.Renderer(env.model, height=480, width=640)
+    renderer = mujoco.Renderer(env.model, height=360, width=480)
     cam = mujoco.MjvCamera()
     cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
     cam.trackbodyid = env.base_body
@@ -76,23 +78,26 @@ def main():
                 act_t, h = student.act(pn, latent, head, h)
                 act = act_t[0].numpy()
             obs, r, done, info = env.step(act, vision_tick=(t + 1) % 5 == 0)
-            renderer.update_scene(env.data, camera=cam)
-            frame = renderer.render()
-            if args.events:
-                ev = obs["events"]
-                panel = np.zeros((64, 64, 3), dtype=np.uint8)
-                panel[..., 0] = (ev[0] * 255).astype(np.uint8)   # positive: red
-                panel[..., 2] = (ev[1] * 255).astype(np.uint8)   # negative: blue
-                import cv2
-                panel = cv2.resize(panel, (160, 160), interpolation=cv2.INTER_NEAREST)
-                frame[10:170, -170:-10] = panel
-            frames.append(frame)
+            if t % 2 == 0:              # 25 fps output
+                renderer.update_scene(env.data, camera=cam)
+                frame = renderer.render().copy()
+                if args.events:
+                    ev = obs["events"]
+                    panel = np.zeros((64, 64, 3), dtype=np.uint8)
+                    panel[..., 0] = np.minimum(ev[0] * 512, 255).astype(np.uint8)  # pos: red
+                    panel[..., 2] = np.minimum(ev[1] * 512, 255).astype(np.uint8)  # neg: blue
+                    panel = np.kron(panel, np.ones((2, 2, 1), dtype=np.uint8))     # 128x128
+                    frame[10:138, -138:-10] = panel
+                frames.append(frame)
             if done:
                 print("episode done:", info)
                 break
 
     import imageio
-    imageio.mimsave(args.out, frames, fps=50)
+    if args.out.endswith(".gif"):
+        imageio.mimsave(args.out, frames, duration=40, loop=0)
+    else:
+        imageio.mimsave(args.out, frames, fps=25)
     print(f"wrote {args.out} ({len(frames)} frames)")
 
 
