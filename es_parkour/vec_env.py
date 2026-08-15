@@ -11,11 +11,15 @@ from .env import ParkourEnv
 
 
 class VecParkourEnv:
-    def __init__(self, cfg: EnvCfg, assets_dir: str, seed: int = 0, workers: int = 16):
+    def __init__(self, cfg: EnvCfg, assets_dir: str, seed: int = 0, workers: int = 16,
+                 enable_vision: bool = False):
         self.cfg = cfg
         self.n = cfg.num_envs
         self.pool = ThreadPoolExecutor(max_workers=workers)
-        self.envs = [ParkourEnv(cfg, assets_dir, seed=seed + i) for i in range(self.n)]
+        self.envs = [ParkourEnv(cfg, assets_dir, seed=seed + i,
+                                enable_vision=enable_vision) for i in range(self.n)]
+        self.global_step = 0
+        self.vision_every = 5          # 50 Hz control / 10 Hz events (paper)
         # fixed terrain-type assignment, round-robin over the paper's four types
         types = cfg.terrain.types
         self.types = [types[i % len(types)] for i in range(self.n)]
@@ -29,9 +33,15 @@ class VecParkourEnv:
         return self._stack(obs)
 
     def step(self, actions: np.ndarray):
+        # render on steps 4, 9, 14, ... so the frame is fresh in the obs that
+        # encoder steps (t % 5 == 0) consume one control step later
+        vision_tick = (self.global_step + 1) % self.vision_every == 0
+        self.last_vision_tick = vision_tick
+        self.global_step += 1
+
         def _step(i):
             env = self.envs[i]
-            obs, rew, done, info = env.step(actions[i])
+            obs, rew, done, info = env.step(actions[i], vision_tick=vision_tick)
             if done:
                 # curriculum: promote/demote on episode outcome, then auto-reset
                 frac = info["wp_frac"]

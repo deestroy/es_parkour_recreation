@@ -16,7 +16,9 @@ import os
 import mujoco
 import numpy as np
 
-from .config import EnvCfg
+from .config import DepthCamCfg, EnvCfg, EventCfg
+from .depth import DepthCamera
+from .event_sim import EventSimulator
 from .scene import build_scene_xml
 from .terrain import Course
 
@@ -33,9 +35,18 @@ def quat_to_mat(q):
 
 
 class ParkourEnv:
-    def __init__(self, cfg: EnvCfg, assets_dir: str, seed: int = 0):
+    def __init__(self, cfg: EnvCfg, assets_dir: str, seed: int = 0,
+                 enable_vision: bool = False):
         self.cfg = cfg
         self.rng = np.random.default_rng(seed)
+        self.enable_vision = enable_vision
+        if enable_vision:
+            self.cam_cfg = DepthCamCfg()
+            self.camera = DepthCamera(self.cam_cfg)
+            self.event_sim = EventSimulator(EventCfg(), far=self.cam_cfg.far)
+            self.last_events = np.zeros(
+                (2, self.cam_cfg.height, self.cam_cfg.width), dtype=np.float32)
+            self.last_depth = None
         t = cfg.terrain
         nrow = int(round(t.course_width / t.resolution)) + 1
         ncol = int(round(t.course_length / t.resolution)) + 1
@@ -131,6 +142,10 @@ class ParkourEnv:
         self.last_dof_vel = np.zeros(12)
         self.finished = False
         self._ep_reward_sums = {}
+        if self.enable_vision:
+            self.event_sim.reset()
+            self.last_events[:] = 0.0
+            self.last_depth = None
         return self._observe()
 
     # ------------------------------------------------------------------
@@ -140,7 +155,7 @@ class ParkourEnv:
             return wps[self.active_wp]
         return np.array([self.course.final_x + 1.0, 0.0])
 
-    def step(self, action: np.ndarray):
+    def step(self, action: np.ndarray, vision_tick: bool = False):
         cfg, m, d = self.cfg, self.model, self.data
         c = cfg.control
         action = np.clip(action, -c.action_clip, c.action_clip)
@@ -166,6 +181,12 @@ class ParkourEnv:
             reached_bonus = 1.0
         if d.qpos[0] > self.course.final_x:
             self.finished = True
+
+        if self.enable_vision and vision_tick:
+            R = quat_to_mat(d.qpos[3:7])
+            depth = self.camera.render(m, d, d.qpos[0:3].copy(), R)
+            self.last_events = self.event_sim.step(depth)
+            self.last_depth = depth
 
         obs = self._observe()
         reward, rew_terms = self._reward(reached_bonus)
@@ -247,12 +268,15 @@ class ParkourEnv:
 
         priv = np.concatenate([lin_vel_b, [self.friction, self.payload]])
         self._yaw_err = yaw_err
-        return {
+        out = {
             "proprio": proprio.astype(np.float32),
             "heading": heading.astype(np.float32),
             "scan": scan.astype(np.float32),
             "priv": priv.astype(np.float32),
         }
+        if self.enable_vision:
+            out["events"] = self.last_events
+        return out
 
     def _reward(self, reached_bonus):
         cfg, d = self.cfg, self.data
