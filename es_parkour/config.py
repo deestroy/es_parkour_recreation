@@ -58,7 +58,7 @@ class RewardCfg:
     cmd_speed: float = 0.8            # m/s toward next waypoint
     tracking_goal_vel: float = 1.5
     tracking_yaw: float = 0.5
-    waypoint_bonus: float = 2.0
+    waypoint_bonus: float = 0.5       # one-time, not dt-scaled
     lin_vel_z: float = -1.0
     ang_vel_xy: float = -0.05
     orientation: float = -0.4
@@ -67,7 +67,7 @@ class RewardCfg:
     action_rate: float = -0.01
     collision: float = -1.0
     feet_edge: float = -0.5
-    termination: float = -5.0
+    termination: float = -1.0         # one-time, not dt-scaled
 
 
 @dataclass

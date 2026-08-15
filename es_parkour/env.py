@@ -309,6 +309,10 @@ class ParkourEnv:
             "collision": rw.collision * float(penalty_contacts > 0),
             "feet_edge": rw.feet_edge * near_edge,
         }
+        # legged-gym convention: per-step reward scales are per-second, applied
+        # x dt; one-time events (waypoint bonus) stay unscaled
+        dt = self.cfg.control.sim_dt * self.cfg.control.decimation
+        terms = {k: (v if k == "waypoint" else v * dt) for k, v in terms.items()}
         return float(sum(terms.values())), terms
 
     def _termination(self):

@@ -26,6 +26,10 @@ class TeacherActorCritic(nn.Module):
         o, n = obs_cfg, net_cfg
         self.scan_encoder = mlp([o.n_scan, *n.scan_hidden, n.scan_latent], out_act=nn.ELU)
         self.priv_encoder = mlp([o.n_priv, 64, n.priv_latent], out_act=nn.ELU)
+        # critic owns separate encoders so its value loss cannot drag the
+        # actor's representation (keeps the policy KL well-behaved)
+        self.c_scan_encoder = mlp([o.n_scan, *n.scan_hidden, n.scan_latent], out_act=nn.ELU)
+        self.c_priv_encoder = mlp([o.n_priv, 64, n.priv_latent], out_act=nn.ELU)
         in_dim = o.n_proprio + o.n_heading + n.scan_latent + n.priv_latent
         self.actor = mlp([in_dim, *n.actor_hidden, num_actions])
         self.critic = mlp([in_dim, *n.critic_hidden, 1])
@@ -36,24 +40,27 @@ class TeacherActorCritic(nn.Module):
         priv_latent = self.priv_encoder(obs["priv"])
         return torch.cat([obs["proprio"], obs["heading"], scan_latent, priv_latent], dim=-1)
 
+    def encode_critic(self, obs):
+        scan_latent = self.c_scan_encoder(obs["scan"])
+        priv_latent = self.c_priv_encoder(obs["priv"])
+        return torch.cat([obs["proprio"], obs["heading"], scan_latent, priv_latent], dim=-1)
+
     def act(self, obs):
-        x = self.encode(obs)
-        mean = self.actor(x)
+        mean = self.actor(self.encode(obs))
         std = self.log_std.exp().expand_as(mean)
         dist = torch.distributions.Normal(mean, std)
         action = dist.sample()
         logp = dist.log_prob(action).sum(-1)
-        value = self.critic(x).squeeze(-1)
+        value = self.critic(self.encode_critic(obs)).squeeze(-1)
         return action, logp, value, mean, std
 
     def evaluate(self, obs, actions):
-        x = self.encode(obs)
-        mean = self.actor(x)
+        mean = self.actor(self.encode(obs))
         std = self.log_std.exp().expand_as(mean)
         dist = torch.distributions.Normal(mean, std)
         logp = dist.log_prob(actions).sum(-1)
         entropy = dist.entropy().sum(-1)
-        value = self.critic(x).squeeze(-1)
+        value = self.critic(self.encode_critic(obs)).squeeze(-1)
         return logp, entropy, value, mean, std
 
     @torch.no_grad()
