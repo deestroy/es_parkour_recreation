@@ -4,3 +4,4 @@ runs/
 assets/go2/scene_parkour.xml
 .DS_Store
 gifs/
+.claude/
