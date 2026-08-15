@@ -116,8 +116,8 @@ class PPOCfg:
     lam: float = 0.95
     clip: float = 0.2
     lr: float = 1.0e-3                # paper: 0.001
-    desired_kl: float = 0.02
-    entropy_coef: float = 0.005
+    desired_kl: float = 0.01
+    entropy_coef: float = 0.002
     value_coef: float = 1.0
     max_grad_norm: float = 1.0
     init_noise_std: float = 1.0
