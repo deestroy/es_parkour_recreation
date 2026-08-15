@@ -44,7 +44,7 @@ class TeacherActorCritic(nn.Module):
         action = dist.sample()
         logp = dist.log_prob(action).sum(-1)
         value = self.critic(x).squeeze(-1)
-        return action, logp, value, mean
+        return action, logp, value, mean, std
 
     def evaluate(self, obs, actions):
         x = self.encode(obs)

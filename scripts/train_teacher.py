@@ -81,16 +81,16 @@ def main():
     for it in range(start_iter, iters):
         with torch.no_grad():
             for _ in range(ppo_cfg.horizon):
-                action, logp, value, _ = policy.act(obs)
+                action, logp, value, mu, sigma = policy.act(obs)
                 nobs, rew, done, infos = env.step(action.cpu().numpy())
-                buf.add(obs, action, logp, rew, done, value)
+                buf.add(obs, action, logp, rew, done, value, mu, sigma)
                 cur_ep_rew += rew
                 for i, dn in enumerate(done):
                     if dn:
                         ep_rew_buf.append(cur_ep_rew[i])
                         cur_ep_rew[i] = 0.0
                 obs = to_torch(nobs)
-            _, _, last_value, _ = policy.act(obs)
+            _, _, last_value, _, _ = policy.act(obs)
         buf.compute_returns(last_value, ppo_cfg.gamma, ppo_cfg.lam)
         stats = algo.update(buf)
         ep_stats.extend(env.pop_episode_infos())

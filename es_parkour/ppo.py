@@ -18,9 +18,11 @@ class RolloutBuffer:
         self.rewards = torch.zeros(horizon, num_envs, device=device)
         self.dones = torch.zeros(horizon, num_envs, device=device)
         self.values = torch.zeros(horizon, num_envs, device=device)
+        self.mu = torch.zeros(horizon, num_envs, 12, device=device)
+        self.sigma = torch.zeros(horizon, num_envs, 12, device=device)
         self.step = 0
 
-    def add(self, obs, action, logp, reward, done, value):
+    def add(self, obs, action, logp, reward, done, value, mu, sigma):
         i = self.step
         for k in self.obs:
             self.obs[k][i] = obs[k]
@@ -29,6 +31,8 @@ class RolloutBuffer:
         self.rewards[i] = torch.as_tensor(reward, device=self.device)
         self.dones[i] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
         self.values[i] = value
+        self.mu[i] = mu
+        self.sigma[i] = sigma
         self.step += 1
 
     def compute_returns(self, last_value, gamma, lam):
@@ -63,6 +67,8 @@ class PPO:
         adv = buf.advantages.reshape(b)
         returns = buf.returns.reshape(b)
         old_values = buf.values.reshape(b)
+        old_mu = buf.mu.reshape(b, -1)
+        old_sigma = buf.sigma.reshape(b, -1)
 
         stats = {"pg_loss": 0.0, "v_loss": 0.0, "entropy": 0.0, "kl": 0.0, "clipfrac": 0.0}
         count = 0
@@ -76,7 +82,11 @@ class PPO:
                 ratio = (logp - old_logp[idx]).exp()
 
                 with torch.no_grad():
-                    kl = (old_logp[idx] - logp).mean()
+                    # analytic KL(old || new) between diagonal Gaussians (rsl_rl)
+                    kl = torch.sum(
+                        torch.log(std / old_sigma[idx] + 1e-5)
+                        + (old_sigma[idx] ** 2 + (old_mu[idx] - mean) ** 2)
+                        / (2.0 * std ** 2) - 0.5, dim=-1).mean()
                     # rsl_rl-style adaptive lr
                     if kl > cfg.desired_kl * 2.0:
                         self.lr = max(1e-5, self.lr / 1.5)
