@@ -52,6 +52,10 @@ def main():
         algo.lr = ck.get("lr", ppo_cfg.lr)
         for k in norm:
             norm[k].load_state_dict(ck["norm"][k])
+        if "levels" in ck:
+            for i, e in enumerate(env.envs):
+                env.levels[i] = ck["levels"][i % len(ck["levels"])]
+                e.set_task(env.types[i], env.levels[i])
         start_iter = ck["iter"] + 1
         print(f"resumed from {args.resume} at iter {start_iter}")
 
